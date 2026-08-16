@@ -1,0 +1,62 @@
+# subgame.lu — helper functions for the subgame library, written in Lumen
+# itself. The drawing/window/keyboard functions (window, rect, circle, line,
+# text, clear, update, isOpen, keyPressed, quit) come from Python and are
+# already loaded automatically before this file runs.
+#
+# Everything in THIS file is plain Lumen logic layered on top of those
+# primitives — feel free to read it, copy it, or add your own functions here.
+
+# Axis-aligned bounding box collision check for two rectangles.
+# Each rectangle is given as (x, y, width, height) — same shape as rect().
+fn collide(ax, ay, aw, ah, bx, by, bw, bh) {
+    if ax < bx + bw {
+        if ax + aw > bx {
+            if ay < by + bh {
+                if ay + ah > by {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+# Keeps a value within [lo, hi] — handy for stopping a player leaving the screen.
+fn clampPosition(x, lo, hi) {
+    if x < lo {
+        return lo
+    }
+    if x > hi {
+        return hi
+    }
+    return x
+}
+
+# Simple distance-based "did these two points touch" check for circles.
+fn circlesTouch(ax, ay, ar, bx, by, br) {
+    let dx = ax - bx
+    let dy = ay - by
+    let distSquared = dx * dx + dy * dy
+    let radiusSum = ar + br
+    return distSquared < radiusSum * radiusSum
+}
+
+# Moves a coordinate toward a target by at most `step`, so movement is smooth
+# instead of teleporting. Useful for simple AI or easing.
+fn moveToward(current, target, step) {
+    if current < target {
+        let next = current + step
+        if next > target {
+            return target
+        }
+        return next
+    }
+    if current > target {
+        let next = current - step
+        if next < target {
+            return target
+        }
+        return next
+    }
+    return current
+}

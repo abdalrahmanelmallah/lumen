@@ -1,0 +1,29 @@
+# strings.lu — helper functions for the strings library, written in
+# Lumen itself. The core operations (upper, lower, trim, split, join,
+# contains, replace, indexOf, startsWith, endsWith, charAt, substring,
+# repeat, isEmpty) come from Python and are already loaded automatically
+# before this file runs.
+#
+# Everything in THIS file is plain Lumen logic layered on top of those
+# primitives — feel free to read it, copy it, or add your own functions here.
+
+fn capitalize(s) {
+    if isEmpty(s) {
+        return s
+    }
+    return upper(charAt(s, 0)) + substring(s, 1)
+}
+
+fn reverseString(s) {
+    let result = ""
+    let i = len(s) - 1
+    while i >= 0 {
+        result = result + charAt(s, i)
+        i = i - 1
+    }
+    return result
+}
+
+fn countOccurrences(s, sub) {
+    return len(split(s, sub)) - 1
+}

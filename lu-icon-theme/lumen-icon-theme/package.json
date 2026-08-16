@@ -1,0 +1,22 @@
+{
+  "name": "lumen-icon-theme",
+  "displayName": "Lumen File Icons",
+  "description": "Shows the Lumen logo as the file icon for .lu files, in the Explorer and editor tabs.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "iconThemes": [
+      {
+        "id": "lumen-icons",
+        "label": "Lumen Icons",
+        "path": "./lumen-icon-theme.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper so you can type: lumen yourfile.lu
+# instead of: python3 /path/to/lumen.py yourfile.lu
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$SCRIPT_DIR/lumen.py" "$@"

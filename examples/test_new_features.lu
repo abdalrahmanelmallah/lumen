@@ -1,0 +1,88 @@
+# --- elif ---
+let x = 5
+if x > 10 {
+    run("big")
+} elif x > 3 {
+    run("medium")
+} else {
+    run("small")
+}
+
+# --- for (C-style) and break/continue ---
+for let i = 0; i < 10; i = i + 1 {
+    if i == 3 { continue }
+    if i == 6 { break }
+    run("for-loop i:", i)
+}
+
+# --- for-in ---
+for item in [10, 20, 30] {
+    run("for-in item:", item)
+}
+
+# --- while with break/continue ---
+let n = 0
+while n < 20 {
+    n = n + 1
+    if n % 2 == 0 { continue }
+    if n > 7 { break }
+    run("odd n:", n)
+}
+
+# --- dictionaries ---
+let person = {"name": "Ada", "age": 30}
+run(person["name"])
+person["age"] = 31
+run(person)
+run(keys(person))
+run(values(person))
+run(hasKey(person, "name"))
+
+# --- classes ---
+class Point {
+    fn init(self, x, y) {
+        self.x = x
+        self.y = y
+    }
+    fn dist(self) {
+        return sqrt(self.x * self.x + self.y * self.y)
+    }
+}
+import "mathx"
+let p = new Point(3, 4)
+run("point x:", p.x, "y:", p.y)
+run("dist:", p.dist())
+
+# --- try/catch ---
+try {
+    let bad = [1, 2][10]
+    run("unreachable")
+} catch err {
+    run("caught error:", err)
+}
+
+# --- string interpolation ---
+let name = "world"
+run(f"hello, {name}! 2+2 = {2 + 2}")
+
+# --- block comments ---
+/* this is a
+   block comment */
+run("after block comment")
+
+# --- bitwise / exponent ---
+run(2 ** 10)
+run(6 & 3)
+run(6 | 1)
+run(5 ^ 1)
+run(1 << 4)
+run(256 >> 4)
+
+# --- ord / chr ---
+run(ord("A"))
+run(chr(66))
+
+# --- namespaced import ---
+import "mathlib" as m
+run(m.square(5))
+run(m.factorial(5))

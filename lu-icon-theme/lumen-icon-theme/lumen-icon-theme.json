@@ -1,0 +1,22 @@
+{
+  "iconDefinitions": {
+    "_lumen_lu_file": {
+      "iconPath": "./icons/lumen-file.png"
+    },
+    "_folder": {
+      "iconPath": "./icons/folder.svg"
+    },
+    "_folder_open": {
+      "iconPath": "./icons/folder-open.svg"
+    },
+    "_file": {
+      "iconPath": "./icons/file.svg"
+    }
+  },
+  "folder": "_folder",
+  "folderExpanded": "_folder_open",
+  "file": "_file",
+  "fileExtensions": {
+    "lu": "_lumen_lu_file"
+  }
+}
