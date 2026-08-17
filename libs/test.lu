@@ -1,0 +1,64 @@
+# test.lu — small assertion helpers for writing tests in Lumen itself.
+#
+# Every assert* function raises an error (with a readable message) when
+# the check fails, and does nothing when it passes — so a whole test
+# file can be wrapped in one try/catch to report the first failure:
+#
+#   import "test"
+#   try {
+#       assertEqual(square(3), 9, "square(3)")
+#       assertTrue(isEven(4), "isEven(4)")
+#       run("all tests passed")
+#   } catch err {
+#       run("TEST FAILED: " + err)
+#   }
+#
+# `err` here isn't a real exception object (Lumen doesn't have one) —
+# it's just the message string, since that's what Lumen's try/catch
+# binds. See README.md's "try/catch" section for details.
+
+fn assertTrue(value, message) {
+    if !value {
+        fail(message, "true", value)
+    }
+}
+
+fn assertFalse(value, message) {
+    if value {
+        fail(message, "false", value)
+    }
+}
+
+fn assertEqual(actual, expected, message) {
+    if actual != expected {
+        fail(message, expected, actual)
+    }
+}
+
+fn assertNotEqual(actual, notExpected, message) {
+    if actual == notExpected {
+        fail(message, "anything but " + str(notExpected), actual)
+    }
+}
+
+# Compares two numbers with a tolerance, for values (like sqrt results)
+# where exact equality isn't realistic.
+fn assertClose(actual, expected, tolerance, message) {
+    let diff = actual - expected
+    if diff < 0 {
+        diff = -diff
+    }
+    if diff > tolerance {
+        fail(message, expected, actual)
+    }
+}
+
+# Internal: builds a consistent failure message and triggers an error
+# by indexing past the end of an empty list — the same mechanism every
+# other out-of-bounds error in Lumen uses, since the language itself
+# has no `throw` statement.
+fn fail(message, expected, actual) {
+    run("FAIL: " + message + " - expected " + str(expected) + ", got " + str(actual))
+    let empty = []
+    empty[0]
+}

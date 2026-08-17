@@ -1,0 +1,60 @@
+# file.lu — helper functions for the file library, written in Lumen
+# itself. The core operations (readFile, writeFile, appendFile, readLines,
+# fileExists, deleteFile, makeDir, listDir, removeDir, copyFile, moveFile,
+# renameFile, fileSize, isFile, isDir, baseName, dirName, joinPath, absPath,
+# currentDir, findFiles, findDirs, searchInFile, searchInFiles) come from
+# Python and are already loaded automatically before this file runs.
+#
+# Everything in THIS file is plain Lumen logic layered on top of those
+# primitives — feel free to read it, copy it, or add your own functions here.
+
+import "strings"
+import "lists"
+
+# Adds `line` to the end of a file, plus a newline — so callers don't have
+# to remember to add "\n" themselves every time they log something.
+fn appendLine(path, line) {
+    appendFile(path, line + "\n")
+    return true
+}
+
+# Reads a file if it exists, or returns `default` instead of raising an
+# error if it doesn't — handy for optional config/save files.
+fn readFileOrDefault(path, default) {
+    if fileExists(path) {
+        return readFile(path)
+    }
+    return default
+}
+
+# The extension of a file name, without the dot — "" if there isn't one.
+# fileExtension("save.txt") -> "txt"
+fn fileExtension(path) {
+    let name = baseName(path)
+    let parts = split(name, ".")
+    if len(parts) < 2 {
+        return ""
+    }
+    return parts[len(parts) - 1]
+}
+
+# The file name without its extension.
+# fileNameWithoutExtension("saves/a.tar.gz") -> "a.tar"
+fn fileNameWithoutExtension(path) {
+    let name = baseName(path)
+    let parts = split(name, ".")
+    if len(parts) < 2 {
+        return name
+    }
+    return join(slice(parts, 0, len(parts) - 1), ".")
+}
+
+# Creates the folder at `path` only if it doesn't already exist — makeDir
+# already tolerates an existing folder, but this reads more clearly when
+# that's the point.
+fn ensureDir(path) {
+    if !isDir(path) {
+        makeDir(path)
+    }
+    return true
+}

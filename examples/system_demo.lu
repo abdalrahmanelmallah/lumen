@@ -1,0 +1,20 @@
+/* system library demo */
+import "system"
+
+run("--- systemInfo ---")
+run(systemInfo())
+
+run("--- clipboardGet (before) ---")
+run(clipboardGet())
+
+run("--- clipboardSet ---")
+run(clipboardSet("hello from lumen!"))
+
+run("--- clipboardGet (after) ---")
+run(clipboardGet())
+
+run("--- volume ---")
+run(getVolume())
+
+run("--- beep ---")
+run(beep())

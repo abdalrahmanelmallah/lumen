@@ -1,0 +1,102 @@
+# collections.lu — Stack, Queue, and Set, written in Lumen itself on top
+# of the plain list/dict primitives that are already built into the
+# language. Import "lists" as well if you also want the free functions
+# (push, pop, map, ...) that these classes are built from.
+
+import "lists"
+
+# A last-in-first-out stack.
+#   let s = new Stack()
+#   s.push(1); s.push(2)
+#   run(s.pop())        # -> 2
+class Stack {
+    fn init(self) {
+        self.items = []
+    }
+
+    fn push(self, value) {
+        self.items = push(self.items, value)
+    }
+
+    fn pop(self) {
+        return pop(self.items)
+    }
+
+    fn peek(self) {
+        return last(self.items)
+    }
+
+    fn isEmpty(self) {
+        return isEmpty(self.items)
+    }
+
+    fn size(self) {
+        return len(self.items)
+    }
+}
+
+# A first-in-first-out queue.
+#   let q = new Queue()
+#   q.enqueue(1); q.enqueue(2)
+#   run(q.dequeue())    # -> 1
+class Queue {
+    fn init(self) {
+        self.items = []
+    }
+
+    fn enqueue(self, value) {
+        self.items = push(self.items, value)
+    }
+
+    # Raises an index error (same as indexing an empty list) if the
+    # queue is empty — check isEmpty() first if you want to avoid that.
+    fn dequeue(self) {
+        let value = self.items[0]
+        self.items = slice(self.items, 1)
+        return value
+    }
+
+    fn peek(self) {
+        return first(self.items)
+    }
+
+    fn isEmpty(self) {
+        return isEmpty(self.items)
+    }
+
+    fn size(self) {
+        return len(self.items)
+    }
+}
+
+# An unordered collection of unique values, backed by a dict for O(1)
+# membership checks.
+#   let s = new Set()
+#   s.add("a"); s.add("b"); s.add("a")
+#   run(s.size())        # -> 2
+#   run(s.has("a"))      # -> true
+class Set {
+    fn init(self) {
+        self.items = {}
+    }
+
+    fn add(self, value) {
+        self.items[str(value)] = value
+    }
+
+    fn remove(self, value) {
+        removeKey(self.items, str(value))
+    }
+
+    fn has(self, value) {
+        return hasKey(self.items, str(value))
+    }
+
+    fn size(self) {
+        return len(keys(self.items))
+    }
+
+    fn toList(self) {
+        return values(self.items)
+    }
+}

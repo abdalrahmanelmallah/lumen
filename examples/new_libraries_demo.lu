@@ -1,0 +1,70 @@
+# Demo of the newer libraries: json, re, datetime, format, collections,
+# and test. Run with:
+#     python3 lumen.py examples/new_libraries_demo.lu
+
+# --- json ---
+import "json"
+
+let config = {"name": "Lumen", "version": 2, "libs": ["json", "re", "datetime"]}
+let text = jsonStringifyPretty(config)
+run(text)
+
+let parsed = jsonParse(text)
+run("loaded name:", parsed["name"])
+run("valid json?", jsonIsValid("{\"ok\": true}"), jsonIsValid("{not json}"))
+
+# --- re ---
+import "re"
+
+let logLine = "2026-02-14 ERROR: connection refused (code 61)"
+run("has error?", reTest("ERROR", logLine))
+run("codes found:", reFindAll("\\d+", logLine))
+run("cleaned:", reReplace("\\s+", "too    many     spaces", " "))
+
+# --- datetime ---
+import "datetime"
+
+run("today is", today())
+run("epoch formatted:", formatTime(0, "%Y-%m-%d"))
+run("a week from epoch:", formatTime(addDays(0, 7), "%Y-%m-%d"))
+
+# --- format ---
+import "format"
+
+run("price:", "$" + toFixed(19.9, 2))
+run("padded id:", "ITEM-" + zeroPad(7, 4))
+run("big number:", withCommas(2500000))
+
+# --- collections ---
+import "collections"
+
+let todo = new Queue()
+todo.enqueue("write docs")
+todo.enqueue("add tests")
+todo.enqueue("ship it")
+while !todo.isEmpty() {
+    run("next task:", todo.dequeue())
+}
+
+let tags = new Set()
+tags.add("lumen")
+tags.add("tiny-language")
+tags.add("lumen")     # duplicate, ignored
+run("unique tags:", tags.size())
+
+# --- test ---
+import "test"
+import "mathlib"
+
+fn testMath() {
+    assertEqual(square(4), 16, "square(4)")
+    assertTrue(isEven(4), "isEven(4)")
+    assertClose(average(1, 2), 1.5, 0.001, "average(1, 2)")
+}
+
+try {
+    testMath()
+    run("all checks passed")
+} catch err {
+    run("check failed:", err)
+}

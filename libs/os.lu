@@ -1,0 +1,45 @@
+# os.lu — helper functions for the os library, written in Lumen itself.
+# The core operations (getEnv, setEnv, hasEnv, envVars, platform, cwd,
+# changeDir, homeDir, tempDir, pathSep, hostname, runCommand, exit) come
+# from Python and are already loaded automatically before this file runs.
+#
+# Everything in THIS file is plain Lumen logic layered on top of those
+# primitives — feel free to read it, copy it, or add your own functions here.
+
+import "strings"
+
+fn isMac() {
+    return platform() == "mac"
+}
+
+fn isWindows() {
+    return platform() == "windows"
+}
+
+fn isLinux() {
+    return platform() == "linux"
+}
+
+# Runs a shell command and returns just its trimmed output — for the common
+# case where you don't care about stderr or the exit code, just the text.
+fn commandOutput(cmd) {
+    let result = runCommand(cmd)
+    return trim(result["stdout"])
+}
+
+# Runs a shell command and returns true/false for whether it succeeded
+# (exit code 0), without you having to reach into the result dict yourself.
+fn commandSucceeded(cmd) {
+    let result = runCommand(cmd)
+    return result["code"] == 0
+}
+
+# exit(0)/exit(1) with names that read better at a call site, e.g.
+# `if somethingWentWrong { exitError() }`.
+fn exitOk() {
+    exit(0)
+}
+
+fn exitError() {
+    exit(1)
+}

@@ -1,0 +1,68 @@
+# strings.lu — helper functions for the strings library, written in
+# Lumen itself. The core operations (upper, lower, trim, split, join,
+# contains, replace, indexOf, startsWith, endsWith, charAt, substring,
+# repeat, isEmpty) come from Python and are already loaded automatically
+# before this file runs.
+#
+# Everything in THIS file is plain Lumen logic layered on top of those
+# primitives — feel free to read it, copy it, or add your own functions here.
+
+import "lists"
+
+fn capitalize(s) {
+    if isEmpty(s) {
+        return s
+    }
+    return upper(charAt(s, 0)) + substring(s, 1)
+}
+
+fn reverseString(s) {
+    let result = ""
+    let i = len(s) - 1
+    while i >= 0 {
+        result = result + charAt(s, i)
+        i = i - 1
+    }
+    return result
+}
+
+fn countOccurrences(s, sub) {
+    return len(split(s, sub)) - 1
+}
+
+# Capitalizes the first letter of every word, leaving the rest of each
+# word untouched. capitalizeWords("hello THERE world") -> "Hello THERE World"
+fn capitalizeWords(s) {
+    let words = split(s, " ")
+    let result = []
+    let i = 0
+    while i < len(words) {
+        result = push(result, capitalize(words[i]))
+        i = i + 1
+    }
+    return join(result, " ")
+}
+
+# Number of whitespace-separated words in a string. Collapses runs of
+# multiple spaces so "a  b" still counts as 2 words, not 3.
+fn wordCount(s) {
+    let trimmed = trim(s)
+    if isEmpty(trimmed) {
+        return 0
+    }
+    let parts = split(trimmed, " ")
+    let count = 0
+    let i = 0
+    while i < len(parts) {
+        if !isEmpty(parts[i]) {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    return count
+}
+
+# True if the string is empty, or contains only whitespace.
+fn isBlank(s) {
+    return isEmpty(trim(s))
+}

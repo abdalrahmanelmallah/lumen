@@ -1,0 +1,15 @@
+# Normalize line endings for text files so contributors on different
+# OSes (this project ships build scripts for all three) don't produce
+# noisy whitespace-only diffs.
+* text=auto eol=lf
+
+# Windows-specific scripts should keep CRLF, since that's what
+# double-clicking expects.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary/generated assets — don't run text normalization on these.
+*.png binary
+*.ico binary
+*.icns binary
+*.zip binary

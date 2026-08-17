@@ -1,0 +1,573 @@
+# encrypt.lu — a real, complete encryption library for Lumen, written
+# entirely in pure Lumen (no Python needed — drop this file in libs/
+# and `import "encrypt"` like any other library).
+#
+# WHAT'S IN HERE
+#   1. SubCipher — a real keyed stream cipher (not a fixed substitution
+#      table). Every character — letters, digits, spaces, punctuation,
+#      symbols, accented/unicode characters — is transformed, using a
+#      pseudorandom keystream generated from your key. A fresh random
+#      salt is mixed in every time you encrypt, so encrypting the same
+#      text twice with the same key gives two different ciphertexts.
+#      A checksum is embedded too, so decrypting with the wrong key is
+#      detected instead of silently returning garbage.
+#   2. Classic educational ciphers (Caesar, ROT13, Atbash, Vigenère, and
+#      a plain substitution cipher) — kept for games, puzzles, and
+#      learning how ciphers work.
+#
+# SECURITY NOTE (read this if you're deciding whether to trust it):
+# An earlier version of SubCipher derived its internal keystream state
+# from a ~31-bit hash of the key (the classic "Park-Miller" generator's
+# modulus). That meant the *key itself* didn't matter much — an attacker
+# could skip guessing keys entirely and just brute-force the ~2.1 billion
+# possible internal states directly, which a single CPU core can finish
+# in under a minute. The embedded checksum (there to detect a wrong key)
+# doubled as a free oracle telling the attacker exactly when they'd found
+# the right one.
+#
+# This version fixes that:
+#   - The keystream generator's internal state is now 128 bits (via a
+#     full-period linear congruential generator over a modulus of 2^128,
+#     using the published PCG constants from O'Neill (2014), which are
+#     proven to visit all 2^128 states before repeating). Brute-forcing
+#     the state space directly is now computationally infeasible — not
+#     "slower", but genuinely out of reach (2^128 is more states than
+#     there are atoms in the observable universe).
+#   - The key is stretched into that 128-bit state through a two-lane
+#     SplitMix64-style avalanche mix, run over many rounds (see
+#     STRETCH_ROUNDS below). This is a lightweight, hand-rolled stand-in
+#     for a real KDF (like PBKDF2/scrypt/Argon2): it makes each *guess*
+#     of a candidate key cost real CPU time, which matters if someone
+#     tries a dictionary/wordlist attack on weak, human-chosen keys
+#     instead of attacking the state space directly.
+#   - The random salt is now also 128 bits (was 31 bits), so it can no
+#     longer be exhausted either.
+#
+# HONEST DISCLAIMER: this is a large, honest improvement over the old
+# design — it closes the specific "just brute-force 2 billion states"
+# attack — but it is still a hand-written, unaudited construction in a
+# toy language, not something that has been through cryptanalysis or a
+# security audit. Use it for games, save files, puzzles, or hiding text
+# from casual eyes. Do NOT use it (or anything in this file) to protect
+# real passwords, financial data, or anything where a break would
+# actually hurt someone — for that, use a real, audited crypto library
+# (e.g. Python's `cryptography`, or libsodium) in a production language.
+# And as always: the strongest lock is worthless with a weak key — use
+# generateKey() (or a long, random passphrase) rather than a short,
+# guessable word.
+
+import "strings"
+import "random"
+import "file"
+
+let ALPHA_LOWER = "abcdefghijklmnopqrstuvwxyz"
+let ALPHA_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+let HEX_DIGITS = "0123456789abcdef"
+let KEY_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#%^&*-_=+"
+
+# Number of possible Unicode code points (0 .. 0x10FFFF inclusive) — the
+# "size of the alphabet" SubCipher works over, instead of just 26 letters.
+let CODE_SPACE = 1114112
+
+# ---- the keystream generator's internal state space (128 bits) ----
+# SEED_MOD is 2^128. LCG_MULT/LCG_INC are the published PCG (O'Neill,
+# 2014) 128-bit LCG constants — chosen so this generator is guaranteed
+# (Hull-Dobell theorem) to have full period: it visits all 2^128
+# possible states before ever repeating.
+let SEED_MOD = 340282366920938463463374607431768211456
+let LCG_MULT = 47026247687942121848144207491837523525
+let LCG_INC = 117397592171526113268558934119004209487
+
+# ---- helpers for keyToSeed's avalanche mixing (SplitMix64-style) ----
+let MOD64 = 18446744073709551616
+let SPLITMIX_C1 = 13787848793156543929
+let SPLITMIX_C2 = 10723151780598845931
+
+# How many extra mixing rounds keyToSeed runs over the key. Higher =
+# slower per-guess for anyone dictionary-attacking real key strings,
+# at the cost of a small, fixed, one-time delay when you yourself call
+# encrypt/decrypt. A few thousand rounds is cheap for a human (well
+# under a second) but adds up fast across millions of guesses.
+let STRETCH_ROUNDS = 20000
+
+# =======================================================================
+# SECTION 1 — SubCipher: a real keyed stream cipher
+# =======================================================================
+
+# ---- small numeric helpers (hex <-> number, using real bit operators) ----
+
+# Converts a non-negative number to a fixed-width lowercase hex string,
+# e.g. intToHex(255, 4) -> "00ff". Uses actual bitwise shifting/masking,
+# not string tricks.
+fn intToHex(n, width) {
+    let result = ""
+    let i = 0
+    while i < width {
+        let shift = 4 * (width - 1 - i)
+        let nibble = (n >> shift) & 15
+        result = result + charAt(HEX_DIGITS, nibble)
+        i = i + 1
+    }
+    return result
+}
+
+# Parses a hex string (as produced by intToHex) back into a number.
+fn hexToInt(hexStr) {
+    let value = 0
+    let i = 0
+    while i < len(hexStr) {
+        let d = indexOf(HEX_DIGITS, lower(charAt(hexStr, i)))
+        value = value * 16 + d
+        i = i + 1
+    }
+    return value
+}
+
+# ---- turning a text key into a numeric seed, and running the PRNG ----
+
+# SplitMix64-style avalanche finalizer: takes any 64-bit number and
+# scrambles it thoroughly (small input changes flip roughly half the
+# output bits). Used below to spread the key's influence across the
+# full 128-bit seed instead of leaving it concentrated in a small hash.
+fn avalanche64(x) {
+    x = x % MOD64
+    x = ((x ^ (x >> 30)) * SPLITMIX_C1) % MOD64
+    x = ((x ^ (x >> 27)) * SPLITMIX_C2) % MOD64
+    x = x ^ (x >> 31)
+    return x % MOD64
+}
+
+# Turns an arbitrary-length key string into a 128-bit keystream seed.
+# Two independent 64-bit "lanes" are folded over every character of the
+# key (each with its own mixing so they diverge), then stretched over
+# STRETCH_ROUNDS extra rounds before being combined into one 128-bit
+# number. See the SECURITY NOTE at the top of this file for why this
+# replaced the old single 31-bit rolling hash.
+fn keyToSeed(key) {
+    let laneA = 1
+    let laneB = 2
+    let i = 0
+    while i < len(key) {
+        let c = ord(charAt(key, i))
+        laneA = avalanche64(laneA + c)
+        laneB = avalanche64((laneB + c * 2654435761 + i) % MOD64)
+        i = i + 1
+    }
+
+    let round = 0
+    while round < STRETCH_ROUNDS {
+        let newLaneA = avalanche64(laneA + laneB + round)
+        let newLaneB = avalanche64(laneB + newLaneA + round)
+        laneA = newLaneA
+        laneB = newLaneB
+        round = round + 1
+    }
+
+    let seed = (laneA * MOD64 + laneB) % SEED_MOD
+    if seed == 0 {
+        seed = 1
+    }
+    return seed
+}
+
+# One step of the keystream generator: a full-period linear congruential
+# generator over SEED_MOD (2^128), seeded from the key. Deterministic:
+# the same seed always produces the same sequence, which is exactly what
+# lets decrypt() rebuild the same keystream the encrypter used. Unlike a
+# bare multiplicative generator, this form (multiply-then-add) is what
+# gives it the full 2^128 period per the Hull-Dobell theorem.
+fn nextState(state) {
+    return (state * LCG_MULT + LCG_INC) % SEED_MOD
+}
+
+# Combines the key's seed with a per-message salt, so the same key never
+# starts the keystream in the same place twice.
+fn deriveInitialState(key, salt) {
+    let combined = (keyToSeed(key) + salt) % SEED_MOD
+    if combined == 0 {
+        combined = 1
+    }
+    return combined
+}
+
+# A simple checksum (not cryptographically secure, just an integrity
+# check) used to detect "wrong key" or corrupted ciphertext on decrypt,
+# instead of silently returning garbage.
+fn checksum(text) {
+    let h = 5381
+    let i = 0
+    while i < len(text) {
+        h = (h * 33 + ord(charAt(text, i))) % 4294967296
+        i = i + 1
+    }
+    return h
+}
+
+# ---- the actual cipher core ----
+
+# Encrypts `text` into a hex-only ciphertext string (6 hex digits per
+# character of `text`), using `key` and a given numeric `salt`.
+fn encryptCore(text, key, salt) {
+    let state = deriveInitialState(key, salt)
+    let result = ""
+    let i = 0
+    while i < len(text) {
+        state = nextState(state)
+        let keystreamVal = state % CODE_SPACE
+        let code = ord(charAt(text, i))
+        let cipherCode = (code + keystreamVal) % CODE_SPACE
+        result = result + intToHex(cipherCode, 6)
+        i = i + 1
+    }
+    return result
+}
+
+# Reverses encryptCore: turns a hex ciphertext body back into text,
+# using the same key and salt that were used to encrypt it.
+fn decryptCore(cipherHex, key, salt) {
+    let state = deriveInitialState(key, salt)
+    let result = ""
+    let i = 0
+    while i * 6 < len(cipherHex) {
+        let chunk = substring(cipherHex, i * 6, i * 6 + 6)
+        let cipherCode = hexToInt(chunk)
+        state = nextState(state)
+        let keystreamVal = state % CODE_SPACE
+        let plainCode = (cipherCode - keystreamVal + CODE_SPACE) % CODE_SPACE
+        result = result + chr(plainCode)
+        i = i + 1
+    }
+    return result
+}
+
+# ---- public API ----
+
+# Generates a random key `length` characters long, drawn from letters,
+# digits, and symbols (KEY_CHARSET) — a real, unpredictable passphrase,
+# not just a shuffled alphabet.
+fn generateKeyOfLength(length) {
+    let n = len(KEY_CHARSET)
+    let key = ""
+    let i = 0
+    while i < length {
+        let idx = randint(0, n - 1)
+        key = key + charAt(KEY_CHARSET, idx)
+        i = i + 1
+    }
+    return key
+}
+
+# Generates a strong 20-character random key. This is the key SubCipher
+# uses by default (see encrypt() below).
+fn generateKey() {
+    return generateKeyOfLength(20)
+}
+
+# Encrypts `text` with a key you choose yourself (any string — a word,
+# a passphrase, a sentence). Returns one ciphertext string containing
+# everything needed to decrypt except the key: a 32-hex-digit (128-bit)
+# salt, an 8-hex-digit checksum, then the encrypted body.
+fn encryptWithKey(text, key) {
+    let salt = randint(1, SEED_MOD - 1)
+    let body = encryptCore(text, key, salt)
+    let check = checksum(text)
+    return intToHex(salt, 32) + intToHex(check, 8) + body
+}
+
+# Decrypts ciphertext produced by encryptWithKey(), using the same key.
+# If the key is wrong (or the ciphertext got corrupted), this prints a
+# warning instead of silently handing back garbage.
+fn decryptWithKey(cipherText, key) {
+    let salt = hexToInt(substring(cipherText, 0, 32))
+    let storedCheck = hexToInt(substring(cipherText, 32, 40))
+    let body = substring(cipherText, 40)
+    let plainText = decryptCore(body, key, salt)
+    if checksum(plainText) != storedCheck {
+        run("Warning: checksum mismatch in encrypt.decryptWithKey() — wrong key, or the ciphertext was corrupted. The text below is probably garbage.")
+    }
+    return plainText
+}
+
+# Checks whether `key` is the correct key for `cipherText`, without
+# printing anything or returning the (possibly garbage) plaintext.
+fn canDecrypt(cipherText, key) {
+    let salt = hexToInt(substring(cipherText, 0, 32))
+    let storedCheck = hexToInt(substring(cipherText, 32, 40))
+    let body = substring(cipherText, 40)
+    let plainText = decryptCore(body, key, salt)
+    return checksum(plainText) == storedCheck
+}
+
+# Encrypts `text` with a brand-new random key and returns them together
+# as a 2-element list: [cipherText, key]. Keep the key — you need the
+# exact same one to decrypt. This is SubCipher's "just encrypt it"
+# entry point, closest to Python's `cryptography` library
+# (`Fernet.generate_key()` then `Fernet(key).encrypt(...)`).
+fn encrypt(text) {
+    let key = generateKey()
+    let cipherText = encryptWithKey(text, key)
+    return [cipherText, key]
+}
+
+# Decrypts ciphertext produced by encrypt(), using the key it returned.
+fn decrypt(cipherText, key) {
+    return decryptWithKey(cipherText, key)
+}
+
+# ---- saving/loading a key to disk, so it survives between runs ----
+
+fn saveKey(key, path) {
+    writeFile(path, key)
+}
+
+fn loadKey(path) {
+    return trim(readFile(path))
+}
+
+# Encrypts `text`, writes the ciphertext to `textPath` and the
+# freshly-generated key to `keyPath`, and returns the key too. Pair
+# with decryptFromFiles() to decrypt later, in a different run.
+fn encryptToFiles(text, textPath, keyPath) {
+    let key = generateKey()
+    let cipherText = encryptWithKey(text, key)
+    writeFile(textPath, cipherText)
+    saveKey(key, keyPath)
+    return key
+}
+
+# Reads ciphertext from `textPath` and the key from `keyPath`, and
+# returns the decrypted plaintext.
+fn decryptFromFiles(textPath, keyPath) {
+    let cipherText = readFile(textPath)
+    let key = loadKey(keyPath)
+    return decryptWithKey(cipherText, key)
+}
+
+# ---------------------------------------------------------------------
+# Encrypting/decrypting an EXISTING file on disk (e.g. notes.txt),
+# rather than a string already in memory. Reads the whole file as text,
+# so this only makes sense for plain-text files — not images, zips, or
+# other binary formats (readFile/writeFile in the `file` library are
+# text-only).
+# ---------------------------------------------------------------------
+
+# Reads `inputPath`, encrypts its contents with a fresh random key,
+# writes the ciphertext to `outputPath`, saves the key to `keyPath`,
+# and returns the key.
+fn encryptFile(inputPath, outputPath, keyPath) {
+    let text = readFile(inputPath)
+    let key = generateKey()
+    let cipherText = encryptWithKey(text, key)
+    writeFile(outputPath, cipherText)
+    saveKey(key, keyPath)
+    return key
+}
+
+# Reads `inputPath` (ciphertext) and `keyPath` (the key), decrypts, and
+# writes the plaintext to `outputPath`. Returns the plaintext too.
+fn decryptFile(inputPath, outputPath, keyPath) {
+    let cipherText = readFile(inputPath)
+    let key = loadKey(keyPath)
+    let plainText = decryptWithKey(cipherText, key)
+    writeFile(outputPath, plainText)
+    return plainText
+}
+
+# =======================================================================
+# SECTION 2 — classic educational ciphers (letters only, kept for games,
+# puzzles, and learning how ciphers work — NOT real security; see
+# SubCipher above for that).
+# =======================================================================
+
+# ---------------------------------------------------------------------
+# Caesar cipher — shifts every letter forward by `shift` places in the
+# alphabet, wrapping around (shift can be negative or bigger than 26).
+# ---------------------------------------------------------------------
+
+fn caesarShiftChar(c, shift) {
+    let lowerIdx = indexOf(ALPHA_LOWER, c)
+    if lowerIdx >= 0 {
+        let newIdx = ((lowerIdx + shift) % 26 + 26) % 26
+        return charAt(ALPHA_LOWER, newIdx)
+    }
+    let upperIdx = indexOf(ALPHA_UPPER, c)
+    if upperIdx >= 0 {
+        let newIdx = ((upperIdx + shift) % 26 + 26) % 26
+        return charAt(ALPHA_UPPER, newIdx)
+    }
+    return c
+}
+
+fn caesarEncrypt(text, shift) {
+    let result = ""
+    let i = 0
+    while i < len(text) {
+        result = result + caesarShiftChar(charAt(text, i), shift)
+        i = i + 1
+    }
+    return result
+}
+
+fn caesarDecrypt(text, shift) {
+    return caesarEncrypt(text, -shift)
+}
+
+# ROT13 is just a Caesar shift of 13 — famously its own inverse.
+fn rot13(text) {
+    return caesarEncrypt(text, 13)
+}
+
+# Tries all 26 possible shifts and prints each result — handy for
+# "cracking" a Caesar-enciphered message by eye.
+fn bruteForceCaesar(text) {
+    let shift = 0
+    while shift < 26 {
+        run(shift, ":", caesarEncrypt(text, shift))
+        shift = shift + 1
+    }
+}
+
+# ---------------------------------------------------------------------
+# Atbash cipher — mirrors the alphabet (a<->z, b<->y, ...). Self-inverse:
+# running it twice gives back the original text.
+# ---------------------------------------------------------------------
+
+fn atbash(text) {
+    let result = ""
+    let i = 0
+    while i < len(text) {
+        let c = charAt(text, i)
+        let lowerIdx = indexOf(ALPHA_LOWER, c)
+        if lowerIdx >= 0 {
+            result = result + charAt(ALPHA_LOWER, 25 - lowerIdx)
+        } else {
+            let upperIdx = indexOf(ALPHA_UPPER, c)
+            if upperIdx >= 0 {
+                result = result + charAt(ALPHA_UPPER, 25 - upperIdx)
+            } else {
+                result = result + c
+            }
+        }
+        i = i + 1
+    }
+    return result
+}
+
+# ---------------------------------------------------------------------
+# Vigenère cipher — a keyword-based Caesar cipher: each letter is shifted
+# by the alphabet position of the matching letter in a repeating keyword
+# (e.g. key "cat" -> shifts of 2, 0, 19, 2, 0, 19, ...). `key` should be
+# letters only and at least 1 character long.
+# ---------------------------------------------------------------------
+
+fn vigenereShift(text, key, sign) {
+    let keyLen = len(key)
+    if keyLen == 0 {
+        return text
+    }
+    let result = ""
+    let keyIndex = 0
+    let i = 0
+    while i < len(text) {
+        let c = charAt(text, i)
+        let isLetter = indexOf(ALPHA_LOWER, c) >= 0 || indexOf(ALPHA_UPPER, c) >= 0
+        if isLetter {
+            let keyChar = lower(charAt(key, keyIndex % keyLen))
+            let shift = indexOf(ALPHA_LOWER, keyChar)
+            result = result + caesarShiftChar(c, sign * shift)
+            keyIndex = keyIndex + 1
+        } else {
+            result = result + c
+        }
+        i = i + 1
+    }
+    return result
+}
+
+fn vigenereEncrypt(text, key) {
+    return vigenereShift(text, key, 1)
+}
+
+fn vigenereDecrypt(text, key) {
+    return vigenereShift(text, key, -1)
+}
+
+# ---------------------------------------------------------------------
+# General substitution cipher — you supply your own scrambled 26-letter
+# alphabet as the key (a permutation of "abcdefghijklmnopqrstuvwxyz").
+# Every 'a' in the text becomes keyAlphabet[0], every 'b' becomes
+# keyAlphabet[1], and so on. More flexible than Caesar/Atbash, and much
+# easier to break with letter-frequency analysis than SubCipher above —
+# same educational-only caveat applies.
+# ---------------------------------------------------------------------
+
+fn substitutionEncrypt(text, keyAlphabet) {
+    let result = ""
+    let i = 0
+    while i < len(text) {
+        let c = charAt(text, i)
+        let lowerIdx = indexOf(ALPHA_LOWER, c)
+        if lowerIdx >= 0 {
+            result = result + charAt(keyAlphabet, lowerIdx)
+        } else {
+            let upperIdx = indexOf(ALPHA_UPPER, c)
+            if upperIdx >= 0 {
+                result = result + upper(charAt(keyAlphabet, upperIdx))
+            } else {
+                result = result + c
+            }
+        }
+        i = i + 1
+    }
+    return result
+}
+
+fn substitutionDecrypt(text, keyAlphabet) {
+    let result = ""
+    let i = 0
+    while i < len(text) {
+        let c = charAt(text, i)
+        let lowerC = lower(c)
+        let pos = indexOf(keyAlphabet, lowerC)
+        if pos >= 0 {
+            let plain = charAt(ALPHA_LOWER, pos)
+            if lowerC == c {
+                result = result + plain
+            } else {
+                result = result + upper(plain)
+            }
+        } else {
+            result = result + c
+        }
+        i = i + 1
+    }
+    return result
+}
+
+# Generates a random scrambled 26-letter alphabet, e.g.
+# "qwertyuiopasdfghjklzxcvbnm" — usable as a keyAlphabet for
+# substitutionEncrypt/substitutionDecrypt above.
+fn generateSubstitutionAlphabet() {
+    let chars = []
+    let i = 0
+    while i < 26 {
+        chars = chars + [charAt(ALPHA_LOWER, i)]
+        i = i + 1
+    }
+    # Fisher-Yates shuffle
+    let n = 26
+    while n > 1 {
+        n = n - 1
+        let j = randint(0, n)
+        let temp = chars[n]
+        chars[n] = chars[j]
+        chars[j] = temp
+    }
+    let key = ""
+    let k = 0
+    while k < 26 {
+        key = key + chars[k]
+        k = k + 1
+    }
+    return key
+}

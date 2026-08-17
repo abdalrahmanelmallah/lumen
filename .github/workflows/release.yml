@@ -1,0 +1,91 @@
+name: Build and Release
+
+# Runs whenever you push a version tag, e.g.:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python3 -m pip install --upgrade pyinstaller
+      - name: Build Lumen.app
+        run: pyinstaller Lumen.spec
+      - name: Zip Lumen.app
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent Lumen.app Lumen.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumen.app.zip
+          path: dist/Lumen.app.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pyinstaller
+      - name: Build Lumen.exe
+        run: pyinstaller Lumen.spec
+      - name: Zip build
+        run: |
+          Compress-Archive -Path dist\Lumen -DestinationPath dist\Lumen-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumen-windows.zip
+          path: dist/Lumen-windows.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Tk (needed by the subgame library) and PyInstaller
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+          python3 -m pip install --upgrade pyinstaller
+      - name: Build Lumen
+        run: pyinstaller Lumen.spec
+      - name: Zip build
+        run: |
+          cd dist
+          zip -r Lumen-linux.zip Lumen
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumen-linux.zip
+          path: dist/Lumen-linux.zip
+
+  release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/Lumen.app.zip/Lumen.app.zip
+            artifacts/Lumen-windows.zip/Lumen-windows.zip
+            artifacts/Lumen-linux.zip/Lumen-linux.zip
+          generate_release_notes: true

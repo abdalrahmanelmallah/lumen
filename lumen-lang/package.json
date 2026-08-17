@@ -1,0 +1,30 @@
+{
+  "name": "lumen-language",
+  "displayName": "Lumen Language Support",
+  "description": "Syntax highlighting for the Lumen (.lu) programming language.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lumen",
+        "aliases": ["Lumen", "lumen"],
+        "extensions": [".lu"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lumen",
+        "scopeName": "source.lumen",
+        "path": "./syntaxes/lumen.tmLanguage.json"
+      }
+    ]
+  }
+}
